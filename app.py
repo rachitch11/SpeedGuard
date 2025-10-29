@@ -42,7 +42,7 @@ st.markdown("### Select Input Mode")
 mode = st.radio(
     "Choose input source",
     ["Live: Laptop + Phone (Back)", "Demo: Upload Videos", "Demo: Pre-loaded Videos"],
-    index=2,  # Pre-loaded demo starts first
+    index=2,
     horizontal=True
 )
 
@@ -64,8 +64,8 @@ if mode == "Live: Laptop + Phone (Back)":
     if not st.session_state.front_url:
         st.warning("Enter IP and click CONNECT")
         st.stop()
-    cap_front = cv2.VideoCapture(st.session_state.front_url)  # Phone = Front
-    cap_back = cv2.VideoCapture(0)  # Laptop = Back
+    cap_front = cv2.VideoCapture(st.session_state.front_url)
+    cap_back = cv2.VideoCapture(0)
 
 # === DEMO MODE: UPLOAD VIDEOS ===
 elif mode == "Demo: Upload Videos":
@@ -90,7 +90,7 @@ elif mode == "Demo: Upload Videos":
         st.stop()
 
 # === DEMO MODE: PRE-LOADED VIDEOS (DEFAULT) ===
-else:  # Pre-loaded
+else:
     st.info("**Pre-loaded Demo** to Test with built-in speeding vehicle video")
     front_path = "videos/front.mp4"
     back_path = "videos/back.mp4"
@@ -136,7 +136,6 @@ while not st.session_state.get("stop", False):
         st.warning("Video ended or stream lost.")
         break
 
-    # Loop video for demo
     if not ret1:
         cap_front.set(cv2.CAP_PROP_POS_FRAMES, 0)
         continue
@@ -147,21 +146,20 @@ while not st.session_state.get("stop", False):
     frame1 = cv2.resize(frame1, (640, 360))
     frame2 = cv2.resize(frame2, (640, 360))
 
-    # FPS
     current_time = time.time()
     fps = 1 / (current_time - st.session_state.get("last_time", current_time)) if frame_count > 0 else 0
     st.session_state.last_time = current_time
     cv2.putText(frame1, f"FPS: {fps:.1f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,0), 2)
 
-    # YOLO with tracking
-    results1 = model.track(frame1, persist=True, tracker="botsort.yaml", verbose=False)[0]
-    results2 = model.track(frame2, persist=True, tracker="botsort.yaml", verbose=False)[0]
+    # YOLO with BUILT-IN TRACKER (NO lap REQUIRED)
+    results1 = model.track(frame1, persist=True, tracker="bytetrack.yaml", verbose=False)[0]
+    results2 = model.track(frame2, persist=True, tracker="bytetrack.yaml", verbose=False)[0]
 
     alert = None
     current_centers = {}
     current_sizes = {}
 
-    # === BACK CAM: HIGH-SPEED APPROACH (IMPROVED & WORKING) ===
+    # === BACK CAM: HIGH-SPEED APPROACH ===
     highspeed_detected = False
     for box in results2.boxes:
         if int(box.cls) != 2: continue
@@ -184,16 +182,14 @@ while not st.session_state.get("stop", False):
                 cv2.putText(frame2, "HIGH SPEED!", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
                 cv2.putText(frame2, f"Score:{speed_score:.1f}", (x1, y1 - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
-    # Beep only once every 5 seconds
     if highspeed_detected and (current_time - st.session_state.last_highspeed_alert > 5.0):
         alert = "HIGH-SPEED VEHICLE APPROACHING!"
         with open(beep_path, "rb") as f:
             st.audio(f, format="audio/wav")
         st.session_state.last_highspeed_alert = current_time
 
-    # === FRONT CAM: BLIND SPOTS (WITH COOLDOWN) ===
-    blind_left = False
-    blind_right = False
+    # === FRONT CAM: BLIND SPOTS ===
+    blind_left = blind_right = False
     h, w = frame1.shape[:2]
     left_zone = (0, int(h*0.33), int(w*0.34), h)
     right_zone = (int(w*0.66), int(h*0.33), w, h)
@@ -208,25 +204,21 @@ while not st.session_state.get("stop", False):
             blind_right = True
             cv2.putText(frame1, "BLIND RIGHT!", (350, 60), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
 
-    # Beep only once every 5 seconds
     if (blind_left or blind_right) and (current_time - st.session_state.last_blind_alert > 5.0):
         alert = "BLIND SPOT LEFT!" if blind_left else "BLIND SPOT RIGHT!"
         with open(beep_path, "rb") as f:
             st.audio(f, format="audio/wav")
         st.session_state.last_blind_alert = current_time
 
-    # === FORCE BEEP ===
     if force_beep and (time.time() - last_beep_time > 5):
         alert = "FORCE BEEP: OK"
         with open(beep_path, "rb") as f:
             st.audio(f, format="audio/wav")
         last_beep_time = time.time()
 
-    # Update tracking
     st.session_state.prev_centers = current_centers.copy()
     st.session_state.prev_sizes = current_sizes.copy()
 
-    # === DISPLAY ===
     with frame_ph.container():
         c1, c2 = st.columns(2)
         c1.image(frame1, channels="BGR", caption="FRONT CAM")
