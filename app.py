@@ -3,7 +3,6 @@ import cv2
 import streamlit as st
 from ultralytics import YOLO
 import numpy as np
-import pygame
 import time
 import os
 
@@ -26,19 +25,16 @@ st.set_page_config(page_title="SpeedGuard", page_icon="Car", layout="wide")
 st.title("SpeedGuard: AI Dashcam Safety System")
 st.markdown("**High-Speed Incoming + Blind Spot Alerts**")
 
-# Initialize pygame
-pygame.mixer.init(frequency=22050, size=-16, channels=2, buffer=512)
+# === BEEP USING st.audio (WORKS ON STREAMLIT CLOUD) ===
 beep_path = "beep.wav"
 if not os.path.exists(beep_path):
     st.error("`beep.wav` not found! Run `python generate_beep.py` first.")
     st.stop()
-beep = pygame.mixer.Sound(beep_path)
 
 # Load YOLO with tracker
 @st.cache_resource
 def load_model():
     return YOLO('yolov8n.pt')
-
 model = load_model()
 
 # === MODE SELECTION (PRE-LOADED VIDEOS DEFAULT) ===
@@ -55,25 +51,21 @@ if mode == "Live: Laptop + Phone (Back)":
     st.info("**Live Mode**: Phone = Front Cam | Laptop = Back Cam (via DroidCam)")
     st.info("1. Open [DroidCam](https://www.dev47apps.com/) on phone to Start Camera to Note IP\n"
             "2. Enter IP below and click **CONNECT**")
-
     col1, col2 = st.columns([3, 1])
     with col1:
         phone_ip = st.text_input("Phone IP (Front Cam)", value=st.session_state.front_ip, key="live_ip")
     with col2:
         connect_btn = st.button("CONNECT", type="primary", use_container_width=True)
-
     if connect_btn:
         st.session_state.front_ip = phone_ip
         st.session_state.front_url = f"http://{phone_ip}:4747/video"
         st.success(f"Connected: {phone_ip}")
         st.rerun()
-
     if not st.session_state.front_url:
         st.warning("Enter IP and click CONNECT")
         st.stop()
-
     cap_front = cv2.VideoCapture(st.session_state.front_url)  # Phone = Front
-    cap_back = cv2.VideoCapture(0)                          # Laptop = Back
+    cap_back = cv2.VideoCapture(0)  # Laptop = Back
 
 # === DEMO MODE: UPLOAD VIDEOS ===
 elif mode == "Demo: Upload Videos":
@@ -83,7 +75,6 @@ elif mode == "Demo: Upload Videos":
         front_file = st.file_uploader("Upload **Front** Video (MP4)", type=["mp4"])
     with col_up2:
         back_file = st.file_uploader("Upload **Back** Video (MP4)", type=["mp4"])
-
     if front_file and back_file:
         front_path = "temp_front.mp4"
         back_path = "temp_back.mp4"
@@ -91,7 +82,6 @@ elif mode == "Demo: Upload Videos":
             f.write(front_file.getbuffer())
         with open(back_path, "wb") as f:
             f.write(back_file.getbuffer())
-
         cap_front = cv2.VideoCapture(front_path)
         cap_back = cv2.VideoCapture(back_path)
         st.success("Videos loaded! Processing...")
@@ -104,11 +94,9 @@ else:  # Pre-loaded
     st.info("**Pre-loaded Demo** to Test with built-in speeding vehicle video")
     front_path = "videos/front.mp4"
     back_path = "videos/back.mp4"
-
     if not os.path.exists(front_path) or not os.path.exists(back_path):
         st.error("Demo videos not found in `videos/` folder!")
         st.stop()
-
     cap_front = cv2.VideoCapture(front_path)
     cap_back = cv2.VideoCapture(back_path)
     st.success("Pre-loaded demo videos loaded!")
@@ -122,7 +110,8 @@ if not cap_front.isOpened() or not cap_back.isOpened():
 col_beep1, col_beep2 = st.columns([1, 3])
 with col_beep1:
     if st.button("TEST BEEP", type="secondary"):
-        beep.play()
+        with open(beep_path, "rb") as f:
+            st.audio(f, format="audio/wav")
         st.toast("Beep played!")
 with col_beep2:
     force_beep = st.checkbox("FORCE BEEP (Every 5 sec)", value=False)
@@ -179,32 +168,27 @@ while not st.session_state.get("stop", False):
         x1, y1, x2, y2 = map(int, box.xyxy[0])
         track_id = int(box.id.item()) if box.id is not None else None
         if not track_id: continue
-
         center = ((x1 + x2) // 2, (y1 + y2) // 2)
         area = (x2 - x1) * (y2 - y1)
         current_centers[track_id] = center
         current_sizes[track_id] = area
-
         prev = st.session_state.prev_centers.get(track_id)
         prev_area = st.session_state.prev_sizes.get(track_id)
-
         if prev and prev_area:
             dy = center[1] - prev[1]
             size_ratio = area / prev_area if prev_area > 0 else 1
             speed_score = abs(dy) * size_ratio
-
-            # RELAXED & RELIABLE: Triggers on real approach
             if dy < -3 and size_ratio > 1.1 and center[1] > 80 and speed_score > 4:
                 highspeed_detected = True
                 cv2.rectangle(frame2, (x1, y1), (x2, y2), (0, 0, 255), 4)
                 cv2.putText(frame2, "HIGH SPEED!", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-                # Optional: Show debug score
                 cv2.putText(frame2, f"Score:{speed_score:.1f}", (x1, y1 - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
     # Beep only once every 5 seconds
     if highspeed_detected and (current_time - st.session_state.last_highspeed_alert > 5.0):
         alert = "HIGH-SPEED VEHICLE APPROACHING!"
-        beep.play()
+        with open(beep_path, "rb") as f:
+            st.audio(f, format="audio/wav")
         st.session_state.last_highspeed_alert = current_time
 
     # === FRONT CAM: BLIND SPOTS (WITH COOLDOWN) ===
@@ -213,7 +197,6 @@ while not st.session_state.get("stop", False):
     h, w = frame1.shape[:2]
     left_zone = (0, int(h*0.33), int(w*0.34), h)
     right_zone = (int(w*0.66), int(h*0.33), w, h)
-
     for box in results1.boxes:
         if int(box.cls) != 2: continue
         x1, y1, x2, y2 = map(int, box.xyxy[0])
@@ -228,13 +211,15 @@ while not st.session_state.get("stop", False):
     # Beep only once every 5 seconds
     if (blind_left or blind_right) and (current_time - st.session_state.last_blind_alert > 5.0):
         alert = "BLIND SPOT LEFT!" if blind_left else "BLIND SPOT RIGHT!"
-        beep.play()
+        with open(beep_path, "rb") as f:
+            st.audio(f, format="audio/wav")
         st.session_state.last_blind_alert = current_time
 
     # === FORCE BEEP ===
     if force_beep and (time.time() - last_beep_time > 5):
         alert = "FORCE BEEP: OK"
-        beep.play()
+        with open(beep_path, "rb") as f:
+            st.audio(f, format="audio/wav")
         last_beep_time = time.time()
 
     # Update tracking
