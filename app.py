@@ -14,7 +14,6 @@ if "prev_centers" not in st.session_state:
     st.session_state.prev_centers = {}
 if "prev_sizes" not in st.session_state:
     st.session_state.prev_sizes = {}
-# NEW: Alert cooldowns
 if "last_highspeed_alert" not in st.session_state:
     st.session_state.last_highspeed_alert = 0
 if "last_blind_alert" not in st.session_state:
@@ -25,19 +24,19 @@ st.set_page_config(page_title="SpeedGuard", page_icon="Car", layout="wide")
 st.title("SpeedGuard: AI Dashcam Safety System")
 st.markdown("**High-Speed Incoming + Blind Spot Alerts**")
 
-# === BEEP USING st.audio (WORKS ON STREAMLIT CLOUD) ===
+# === BEEP USING st.audio ===
 beep_path = "beep.wav"
 if not os.path.exists(beep_path):
     st.error("`beep.wav` not found! Run `python generate_beep.py` first.")
     st.stop()
 
-# Load YOLO with tracker
+# Load YOLO
 @st.cache_resource
 def load_model():
     return YOLO('yolov8n.pt')
 model = load_model()
 
-# === MODE SELECTION (PRE-LOADED VIDEOS DEFAULT) ===
+# === MODE SELECTION ===
 st.markdown("### Select Input Mode")
 mode = st.radio(
     "Choose input source",
@@ -46,7 +45,7 @@ mode = st.radio(
     horizontal=True
 )
 
-# === LIVE MODE: PHONE = FRONT, LAPTOP = BACK ===
+# === LIVE MODE ===
 if mode == "Live: Laptop + Phone (Back)":
     st.info("**Live Mode**: Phone = Front Cam | Laptop = Back Cam (via DroidCam)")
     st.info("1. Open [DroidCam](https://www.dev47apps.com/) on phone to Start Camera to Note IP\n"
@@ -67,7 +66,7 @@ if mode == "Live: Laptop + Phone (Back)":
     cap_front = cv2.VideoCapture(st.session_state.front_url)
     cap_back = cv2.VideoCapture(0)
 
-# === DEMO MODE: UPLOAD VIDEOS ===
+# === UPLOAD MODE ===
 elif mode == "Demo: Upload Videos":
     st.info("**Upload Test Videos** to Test with your own speeding vehicle footage")
     col_up1, col_up2 = st.columns(2)
@@ -86,10 +85,10 @@ elif mode == "Demo: Upload Videos":
         cap_back = cv2.VideoCapture(back_path)
         st.success("Videos loaded! Processing...")
     else:
-        st.warning("Upload both front and back videos to start, can also upload same video in both slots.")
+        st.warning("Upload both videos to start")
         st.stop()
 
-# === DEMO MODE: PRE-LOADED VIDEOS (DEFAULT) ===
+# === PRE-LOADED DEMO ===
 else:
     st.info("**Pre-loaded Demo** to Test with built-in speeding vehicle video")
     front_path = "videos/front.mp4"
@@ -101,12 +100,12 @@ else:
     cap_back = cv2.VideoCapture(back_path)
     st.success("Pre-loaded demo videos loaded!")
 
-# === VALIDATE CAPTURES ===
+# === VALIDATE ===
 if not cap_front.isOpened() or not cap_back.isOpened():
-    st.error("Failed to open one or both video streams.")
+    st.error("Failed to open video streams.")
     st.stop()
 
-# === TEST BEEP & FORCE BEEP ===
+# === TEST BEEP ===
 col_beep1, col_beep2 = st.columns([1, 3])
 with col_beep1:
     if st.button("TEST BEEP", type="secondary"):
@@ -116,11 +115,11 @@ with col_beep1:
 with col_beep2:
     force_beep = st.checkbox("FORCE BEEP (Every 5 sec)", value=False)
 
-# === DISPLAY PLACEHOLDERS ===
+# === DISPLAY ===
 frame_ph = st.empty()
 alert_ph = st.empty()
 
-# === MAIN PROCESSING LOOP ===
+# === MAIN LOOP ===
 stop_button = st.button("STOP", type="secondary")
 if stop_button:
     st.session_state.stop = True
@@ -131,11 +130,9 @@ frame_count = 0
 while not st.session_state.get("stop", False):
     ret1, frame1 = cap_front.read()
     ret2, frame2 = cap_back.read()
-
     if not ret1 or not ret2:
-        st.warning("Video ended or stream lost.")
+        st.warning("Video ended.")
         break
-
     if not ret1:
         cap_front.set(cv2.CAP_PROP_POS_FRAMES, 0)
         continue
@@ -151,15 +148,15 @@ while not st.session_state.get("stop", False):
     st.session_state.last_time = current_time
     cv2.putText(frame1, f"FPS: {fps:.1f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,0), 2)
 
-    # YOLO with BUILT-IN TRACKER (NO lap REQUIRED)
-    results1 = model.track(frame1, persist=True, tracker="bytetrack.yaml", verbose=False)[0]
-    results2 = model.track(frame2, persist=True, tracker="bytetrack.yaml", verbose=False)[0]
+    # YOLO TRACKING WITH BOTSORT (lap installed)
+    results1 = model.track(frame1, persist=True, tracker="botsort.yaml", verbose=False)[0]
+    results2 = model.track(frame2, persist=True, tracker="botsort.yaml", verbose=False)[0]
 
     alert = None
     current_centers = {}
     current_sizes = {}
 
-    # === BACK CAM: HIGH-SPEED APPROACH ===
+    # === BACK CAM: HIGH-SPEED ===
     highspeed_detected = False
     for box in results2.boxes:
         if int(box.cls) != 2: continue
