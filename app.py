@@ -24,14 +24,11 @@ st.set_page_config(page_title="SpeedGuard", page_icon="Car", layout="wide")
 st.title("SpeedGuard: AI Dashcam Safety System")
 st.markdown("**High-Speed Incoming + Blind Spot Alerts**")
 
-# === BEEP USING HIDDEN AUDIO (NO DUPLICATE ID) ===
+# === BEEP USING st.experimental_audio (NO ID CONFLICT) ===
 beep_path = "beep.wav"
 if not os.path.exists(beep_path):
     st.error("`beep.wav` not found! Run `python generate_beep.py` first.")
     st.stop()
-
-# Create a single audio placeholder (outside loop)
-audio_placeholder = st.empty()
 
 # Load YOLO
 @st.cache_resource
@@ -113,7 +110,7 @@ col_beep1, col_beep2 = st.columns([1, 3])
 with col_beep1:
     if st.button("TEST BEEP", type="secondary"):
         with open(beep_path, "rb") as f:
-            audio_placeholder.audio(f, format="audio/wav", autoplay=True)
+            st.experimental_audio(f, format="audio/wav", autoplay=True)
         st.toast("Beep played!")
 with col_beep2:
     force_beep = st.checkbox("FORCE BEEP (Every 5 sec)", value=False)
@@ -185,7 +182,7 @@ while not st.session_state.get("stop", False):
     if highspeed_detected and (current_time - st.session_state.last_highspeed_alert > 5.0):
         alert = "HIGH-SPEED VEHICLE APPROACHING!"
         with open(beep_path, "rb") as f:
-            audio_placeholder.audio(f, format="audio/wav", autoplay=True)
+            st.experimental_audio(f, format="audio/wav", autoplay=True)
         st.session_state.last_highspeed_alert = current_time
 
     # === FRONT CAM: BLIND SPOTS ===
@@ -207,13 +204,13 @@ while not st.session_state.get("stop", False):
     if (blind_left or blind_right) and (current_time - st.session_state.last_blind_alert > 5.0):
         alert = "BLIND SPOT LEFT!" if blind_left else "BLIND SPOT RIGHT!"
         with open(beep_path, "rb") as f:
-            audio_placeholder.audio(f, format="audio/wav", autoplay=True)
+            st.experimental_audio(f, format="audio/wav", autoplay=True)
         st.session_state.last_blind_alert = current_time
 
     if force_beep and (time.time() - last_beep_time > 5):
         alert = "FORCE BEEP: OK"
         with open(beep_path, "rb") as f:
-            audio_placeholder.audio(f, format="audio/wav", autoplay=True)
+            st.experimental_audio(f, format="audio/wav", autoplay=True)
         last_beep_time = time.time()
 
     st.session_state.prev_centers = current_centers.copy()
