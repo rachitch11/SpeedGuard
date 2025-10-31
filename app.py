@@ -1,3 +1,4 @@
+
 # app.py
 import cv2
 import streamlit as st
@@ -99,7 +100,40 @@ def detect_traffic_light(frame, boxes):
                 return "GREEN LIGHT!"
     return None
 
-# === SESSION STATE (REMOVED distraction/drowsiness) ===
+# === NEW: SPEEDING ALERT (YOU ARE GOING TOO FAST) ===
+def detect_speeding(results, frame):
+    h, w = frame.shape[:2]
+    far_zone = (0, 0, w, int(h * 0.5))  # Top half = far ahead
+    car_count = 0
+    for box in results.boxes:
+        if int(box.cls) != 2: continue
+        x1, y1, x2, y2 = map(int, box.xyxy[0])
+        if y2 < far_zone[3]:  # Car is in far zone
+            car_count += 1
+    if car_count > 8:
+        cv2.putText(frame, "SLOW DOWN! SPEEDING!", (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
+        return "SLOW DOWN! YOU ARE SPEEDING!"
+    return None
+
+# === NEW: TRAFFIC AHEAD ANALYSIS (GO SLOW / GO FASTER) ===
+def analyze_traffic_ahead(results, frame):
+    h, w = frame.shape[:2]
+    mid_zone = (0, int(h * 0.3), w, int(h * 0.7))  # Middle = upcoming traffic
+    car_count = 0
+    for box in results.boxes:
+        if int(box.cls) != 2: continue
+        x1, y1, x2, y2 = map(int, box.xyxy[0])
+        if y1 > mid_zone[1] and y2 < mid_zone[3]:
+            car_count += 1
+    if car_count >= 6:
+        cv2.putText(frame, "TRAFFIC AHEAD - GO SLOW", (10, 130), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 165, 255), 2)
+        return "Traffic ahead. Go slow."
+    elif car_count <= 2:
+        cv2.putText(frame, "CLEAR AHEAD - CAN GO FASTER", (10, 130), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+        return "Road is clear. You can go faster."
+    return None
+
+# === SESSION STATE ===
 for key in ["front_url", "back_url", "front_ip", "back_ip", "stop", "last_time", "demo_mode"]:
     if key not in st.session_state:
         st.session_state[key] = None if "ip" not in key and "url" not in key else "192.168.1.100"
@@ -121,13 +155,18 @@ if "last_speed_limit_alert" not in st.session_state:
     st.session_state.last_speed_limit_alert = 0
 if "last_traffic_light_alert" not in st.session_state:
     st.session_state.last_traffic_light_alert = 0
+# === NEW: SESSION STATE FOR NEW ALERTS ===
+if "last_speeding_alert" not in st.session_state:
+    st.session_state.last_speeding_alert = 0
+if "last_traffic_advice" not in st.session_state:
+    st.session_state.last_traffic_advice = 0
 
 # === SETUP ===
 st.set_page_config(page_title="SpeedGuard", page_icon="Car", layout="wide")
 st.title("SpeedGuard: AI Dashcam Safety System")
-st.markdown("**High-Speed, Blind Spot, Turn, Speed Limit, Traffic Light Alerts**")
+st.markdown("**High-Speed, Blind Spot, Turn, Speed Limit, Traffic Light, Speeding, Traffic Ahead Alerts**")
 
-# === FIXED PYGAME INIT (CORRECT SYNTAX) ===
+# === FIXED PYGAME INIT ===
 try:
     pygame.mixer.pre_init(frequency=22050, size=-16, channels=2, buffer=512)
     pygame.mixer.init()
@@ -145,7 +184,7 @@ beep.set_volume(1.0)
 @st.cache_resource
 def load_model():
     model = YOLO('yolov8n.pt')
-    model.fuse = lambda *args, **kwargs: model  # DISABLE FUSE
+    model.fuse = lambda *args, **kwargs: model
     return model
 
 model = load_model()
@@ -205,26 +244,20 @@ elif mode == "Demo: Upload Videos":
 # === DEMO MODE: PRE-LOADED VIDEOS FROM GOOGLE DRIVE ===
 else:
     st.info("**Pre-loaded Demo** – Loading videos from Google Drive for demo ... Dont close the app!, wait for 2 mins")
-
     import gdown
-
-    FRONT_ID = "1wZcagbZnvPyAeyse0CSP75KIySCHj2wA"  # front.mp4
-    BACK_ID  = "1SxKs_F6V2FmK2qoEJxsVyvsqfGqzZkvQ"   # back.mp4
-
+    FRONT_ID = "1wZcagbZnvPyAeyse0CSP75KIySCHj2wA"
+    BACK_ID  = "1SxKs_F6V2FmK2qoEJxsVyvsqfGqzZkvQ"
     front_path = "temp_front_drive.mp4"
     back_path  = "temp_back_drive.mp4"
-
     if not os.path.exists(front_path):
         st.warning("Downloading front video from Google Drive...")
         gdown.download(f"https://drive.google.com/uc?id={FRONT_ID}", front_path, quiet=False)
     if not os.path.exists(back_path):
         st.warning("Downloading back video from Google Drive...")
         gdown.download(f"https://drive.google.com/uc?id={BACK_ID}", back_path, quiet=False)
-
     if not os.path.exists(front_path) or not os.path.exists(back_path):
         st.error("Failed to download videos from Google Drive!")
         st.stop()
-
     cap_front = cv2.VideoCapture(front_path)
     cap_back = cv2.VideoCapture(back_path)
     st.success("Google Drive demo videos loaded!")
@@ -330,7 +363,7 @@ if st.session_state.streaming:
             elif right_zone[0] < cx < right_zone[2]:
                 blind_right = True
                 cv2.putText(frame1, "BLIND RIGHT!", (350, 60), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
-        if (blind_left or blind_right) and (current_time - st.session_state.last_blind_alert > 5.0):
+        if (blind_left or blind_right) and (current_time - st.session_state.last_blind_alert > 10.0):
             side = "left" if blind_left else "right"
             alert = f"BLIND SPOT {side.upper()}!"
             beep.play()
@@ -363,6 +396,22 @@ if st.session_state.streaming:
             speak(traffic_light.replace("!", ""))
             cv2.putText(frame1, traffic_light, (200, 200), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
             st.session_state.last_traffic_light_alert = current_time
+
+        # === NEW: SPEEDING ALERT (YOU ARE TOO FAST) ===
+        speeding_alert = detect_speeding(results1, frame1)
+        if speeding_alert and (current_time - st.session_state.last_speeding_alert > 5.0):
+            alert = speeding_alert
+            beep.play()
+            speak("Slow down! You are speeding!")
+            st.session_state.last_speeding_alert = current_time
+
+        # === NEW: TRAFFIC AHEAD ANALYSIS ===
+        traffic_advice = analyze_traffic_ahead(results1, frame1)
+        if traffic_advice and (current_time - st.session_state.last_traffic_advice > 10.0):
+            alert = traffic_advice.upper()
+            beep.play()
+            speak(traffic_advice)
+            st.session_state.last_traffic_advice = current_time
 
         # === FORCE ALERT ===
         if force_beep and (time.time() - last_beep_time > 5):
